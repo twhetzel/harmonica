@@ -5,6 +5,7 @@ import logging
 from oaklib import get_adapter
 from oaklib.datamodels.search import SearchProperty, SearchConfiguration
 import pandas as pd
+import numpy as np
 from pathlib import Path
 
 __all__ = [
@@ -54,7 +55,7 @@ def fetch_ontology(ontology_id):
     """
     logger.info('** Fetching ontology')
     # TODO: Sort out how to download new ontology version if file already at ~/.data/oaklib
-    # This can not be done automatically. See https://incatools.github.io/ontology-access-kit/faq/troubleshooting.html#my-cached-sqlite-ontology-is-out-of-date
+    # This _CAN NOT_ be done automatically. See https://incatools.github.io/ontology-access-kit/faq/troubleshooting.html#my-cached-sqlite-ontology-is-out-of-date
     adapter = get_adapter(f"sqlite:obo:{ontology_id}")
     
     for ont in adapter.ontologies():
@@ -64,7 +65,7 @@ def fetch_ontology(ontology_id):
     return adapter
 
 
-def search_ontology(adapter, df, config):
+def search_ontology(ontology_id, adapter, df, config):
     """
     Search for exact matches to the ontology term label.
     :param adapter: The connector to the ontology database.
@@ -73,11 +74,23 @@ def search_ontology(adapter, df, config):
     exact_search_results = []
     
     for index, row in df.iterrows():
-        for result in adapter.basic_search(row.iloc[0], config=config):
-            exact_search_results.append([row.iloc[0], result, adapter.label(result)])
+        # TODO: Parameterize search column
+        for result in adapter.basic_search(row.iloc[2], config=config):
+            logger.debug(f'{row.iloc[2]} --- {result}')
+            exact_search_results.append([row.iloc[2], result, adapter.label(result)])
 
     search_results_df = pd.DataFrame(exact_search_results)
-    logger.debug(search_results_df)
+    
+    # Add column headers
+    search_results_df.columns = ['source_column_value', f'{ontology_id}_result_curie', f'{ontology_id}_result_label']
+    
+    # Add column to indicate type of search match
+    search_results_df['type_of_result_match'] = np.where(
+        search_results_df[f'{ontology_id}_result_curie'].notnull(), f'{ontology_id}_result_label', '')
+    
+    print(search_results_df.head())
+
+    return search_results_df
 
 
 @main.command("search")
@@ -95,40 +108,45 @@ def search(ontology_id, data_filename):
     # Read in the data file
     file_path = Path(f'data/input/{data_filename}')
     xls = pd.ExcelFile(file_path)
-    # TODO: parameterize sheet name?
+    # TODO: parameterize Sheet name variable?
     data_df = pd.read_excel(xls, 'Sheet1') #condition_codes_v5
     logger.info(data_df.nunique())
 
-    # Configure the search -- KEEP!
-    # config = SearchConfiguration(syntax=SearchTermSyntax.STARTS_WITH) # Example from: https://github.com/INCATools/ontology-access-kit/blob/main/notebooks/Developers-Tutorial.ipynb
-
-    # Configure the search -- KEEP!
-    # config = SearchConfiguration(
-    #     # properties=[SearchProperty.ALIAS], # matches to label and synonyms
-    #     properties=[SearchProperty.LABEL], #matches label only
-    #     force_case_insensitive=True,
-    #     # is_complete=True,
-    #     # is_partial=True, # does not seem to work even with single token label, e.g. ureteroc MONDO:0008628
-    #     # is_fuzzy=True, # does not seem to work for fuzzy match to labels (ureteroc MONDO:0008628) or synonyms (intertricular commcation MONDO:0002070)
-    # )
-
     # Search for matching ontology terms
     exact_label_search_config = SearchConfiguration(
-        # TODO: Find out how to use object_source to limit results to an ontology as well as 
-        # object_source_match and snippet from SearchResult. 
-        # See https://incatools.github.io/ontology-access-kit/datamodels/search/ and 
-        # https://incatools.github.io/ontology-access-kit/datamodels/search/SearchResult.html 
         properties=[SearchProperty.LABEL],
         force_case_insensitive=True,
     )
+
+    exact_label_results_df = search_ontology(ontology_id, adapter, data_df, exact_label_search_config)
+    
+    # Join exact_label_results_df back to original input data
+    overall_results_df = pd.merge(data_df, exact_label_results_df, how='left', on='source_column_value')
+
+    # Copy search result values into their existing column, e.g. mondo_result_label --> mondoLabel
+    if ontology_id == str('MONDO').lower():
+        # Update values in the existing columns
+        overall_results_df['mondoLabel'] = overall_results_df['mondo_result_label']
+        overall_results_df['mondoCode'] = overall_results_df['mondo_result_curie']
+
+        # Drop the search_results columns
+        overall_results_df.drop(['mondo_result_label'], axis=1, inplace=True)
+        overall_results_df.drop(['mondo_result_curie'], axis=1, inplace=True)
+
+    
+    # Save to file
+    overall_results_df.to_excel('mondo_exact_label_results.xlsx')
+
+    exit()
 
     exact_label_synonym_search_config = SearchConfiguration(
         properties=[SearchProperty.ALIAS],
         force_case_insensitive=True,
     )
 
-    exact_matches = search_ontology(adapter, data_df, exact_label_search_config)
-    
+    exact_label_synonym_results_df = search_ontology(adapter, data_df, exact_label_synonym_search_config)
+
+    exact_label_synonym_results_df.to_excel('mondo_exact_label_synonym_results.xlsx')
 
 
 @main.command("hello")
