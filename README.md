@@ -35,6 +35,7 @@ The input data file is expected to be stored locally at `data/input/` and the re
 
 
 ## Further Investigation
+Review these items later to see if they can be done with OAK.
 
 ### Sort out if/how other parameters work for OAK Search
  # Configure the search -- KEEP!
