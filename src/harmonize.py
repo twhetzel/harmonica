@@ -5,6 +5,7 @@ import uuid
 import logging
 from oaklib import get_adapter
 from oaklib.datamodels.search import SearchProperty, SearchConfiguration
+from oaklib.implementations.sqldb.sql_implementation import SqlImplementation
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -49,7 +50,7 @@ def main(verbose: int, quiet: bool):
         logger.setLevel(level=logging.ERROR)
 
 
-def fetch_ontology(ontology_id):
+def fetch_ontology(ontology_id: str) -> SqlImplementation:
     """
     Download ontology of interest and convert to SQLite database.
     :param ontology_id: The OBO identifier of the ontology.
@@ -63,11 +64,11 @@ def fetch_ontology(ontology_id):
     for ont in adapter.ontologies():
         ontology_metadata = adapter.ontology_metadata_map(ont)
         logger.info(f"Ontology metadata: {ontology_metadata['id']}, {ontology_metadata['owl:versionIRI']}")
-    
+
     return adapter
 
 
-def search_ontology(ontology_id, adapter, df, config):
+def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFrame, config: dict) -> pd.DataFrame:
     """
     Search for exact matches to the ontology term label.
     :param adapter: The connector to the ontology database.
@@ -80,8 +81,9 @@ def search_ontology(ontology_id, adapter, df, config):
     
     for index, row in df.iterrows():
         # TODO: Parameterize search column
+        # TODO: Fix bug when multiple synonym results!
         for result in adapter.basic_search(row.iloc[2], config=config):
-            # logger.debug(f'{row["UUID"]} -- {row.iloc[2]} ---> {result}')
+            logger.debug(f'{row["UUID"]} -- {row.iloc[2]} ---> {result}')
             exact_search_results.append([row["UUID"], result, adapter.label(result)])
             # Update the progress bar
             progress_bar.update(1)
@@ -97,9 +99,6 @@ def search_ontology(ontology_id, adapter, df, config):
 
     # Filter rows to keep those where '{ontology}_result_curie' starts with 'MONDO'
     search_results_df = search_results_df[search_results_df[f'{ontology_id}_result_curie'].str.startswith(f'{ontology_id}'.upper())]
-    
-    # Filter out any HP results when searching MONDO
-    # search_results_df = search_results_df[~search_results_df[f'{ontology_id}_result_curie'].str.startswith('HP')]
 
     # Add column to indicate type of search match
     if str(config.properties[0]) == 'LABEL':
@@ -113,29 +112,18 @@ def search_ontology(ontology_id, adapter, df, config):
     return search_results_df
 
 
-def generate_uuid():
+def generate_uuid() -> str:
     """Function to generate UUID"""
     return str(uuid.uuid4())
 
 
-def _clean_up_columns(df, ontology_id):
+def _clean_up_columns(df: pd.DataFrame, ontology_id: str) -> pd.DataFrame:
     """
     Copy over the search results to the columns from the input dataframe
     amd remove the extra columns added with the search results.
     :param df: The dataframe from the merge of the search results with the original dataframe.
     :param ontology_id: The ontology identifier, ie. the ontology being searched  
     """
-    # Copy search result values into their existing column, e.g. mondo_result_label --> mondoLabel
-    # if ontology_id == str('MONDO').lower():
-    #     # Update values in the existing columns
-    #     df['mondoLabel'] = df['mondo_result_label']
-    #     df['mondoCode'] = df['mondo_result_curie']
-    
-    #     # Drop the search_results columns
-    #     df.drop(['mondo_result_label'], axis=1, inplace=True)
-    #     df.drop(['mondo_result_curie'], axis=1, inplace=True)
-
-
     # Handle clean-up after a second round of synonym search
     if ontology_id == str('MONDO').lower():
         if 'type_of_result_match_x' in df.columns and 'type_of_result_match_y' in df.columns:
@@ -164,7 +152,7 @@ def _clean_up_columns(df, ontology_id):
 @main.command("search")
 @click.argument('ontology_id')
 @click.argument('data_filename')
-def search(ontology_id, data_filename):
+def search(ontology_id: str, data_filename: str):
     """
     Search an ontology for matches to terms in a data file.
     :param ontology_id: The OBO identifier of the ontology.
