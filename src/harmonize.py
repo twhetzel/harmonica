@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 
 import click
+import uuid
 import logging
 from oaklib import get_adapter
 from oaklib.datamodels.search import SearchProperty, SearchConfiguration
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from tqdm import tqdm
 
 __all__ = [
     "main",
@@ -72,25 +74,91 @@ def search_ontology(ontology_id, adapter, df, config):
     :param df: Dataframe containing terms to search and find matches to the ontology.
     """
     exact_search_results = []
+
+    # Create a tqdm instance
+    progress_bar = tqdm(total=len(df), desc="Processing Rows", unit="row")
     
     for index, row in df.iterrows():
         # TODO: Parameterize search column
         for result in adapter.basic_search(row.iloc[2], config=config):
-            logger.debug(f'{row.iloc[2]} --- {result}')
-            exact_search_results.append([row.iloc[2], result, adapter.label(result)])
+            # logger.debug(f'{row["UUID"]} -- {row.iloc[2]} ---> {result}')
+            exact_search_results.append([row["UUID"], result, adapter.label(result)])
+            # Update the progress bar
+            progress_bar.update(1)
 
+    # Close the progress bar
+    progress_bar.close()
+
+    # Convert search results to dataframe
     search_results_df = pd.DataFrame(exact_search_results)
     
     # Add column headers
-    search_results_df.columns = ['source_column_value', f'{ontology_id}_result_curie', f'{ontology_id}_result_label']
+    search_results_df.columns = ['UUID', f'{ontology_id}_result_curie', f'{ontology_id}_result_label']
+
+    # Filter rows to keep those where '{ontology}_result_curie' starts with 'MONDO'
+    search_results_df = search_results_df[search_results_df[f'{ontology_id}_result_curie'].str.startswith(f'{ontology_id}'.upper())]
     
+    # Filter out any HP results when searching MONDO
+    # search_results_df = search_results_df[~search_results_df[f'{ontology_id}_result_curie'].str.startswith('HP')]
+
     # Add column to indicate type of search match
-    search_results_df['type_of_result_match'] = np.where(
-        search_results_df[f'{ontology_id}_result_curie'].notnull(), f'{ontology_id}_result_label', '')
+    if str(config.properties[0]) == 'LABEL':
+        search_results_df['type_of_result_match'] = np.where(
+            search_results_df[f'{ontology_id}_result_curie'].notnull(), f'{ontology_id.upper()}_EXACT_LABEL', '')
     
-    print(search_results_df.head())
+    if str(config.properties[0]) == 'ALIAS':
+        search_results_df['type_of_result_match'] = np.where(
+            search_results_df[f'{ontology_id}_result_curie'].notnull(), f'{ontology_id.upper()}_EXACT_ALIAS', '')
 
     return search_results_df
+
+
+def generate_uuid():
+    """Function to generate UUID"""
+    return str(uuid.uuid4())
+
+
+def _clean_up_columns(df, ontology_id):
+    """
+    Copy over the search results to the columns from the input dataframe
+    amd remove the extra columns added with the search results.
+    :param df: The dataframe from the merge of the search results with the original dataframe.
+    :param ontology_id: The ontology identifier, ie. the ontology being searched  
+    """
+    # Copy search result values into their existing column, e.g. mondo_result_label --> mondoLabel
+    # if ontology_id == str('MONDO').lower():
+    #     # Update values in the existing columns
+    #     df['mondoLabel'] = df['mondo_result_label']
+    #     df['mondoCode'] = df['mondo_result_curie']
+    
+    #     # Drop the search_results columns
+    #     df.drop(['mondo_result_label'], axis=1, inplace=True)
+    #     df.drop(['mondo_result_curie'], axis=1, inplace=True)
+
+
+    # Handle clean-up after a second round of synonym search
+    if ontology_id == str('MONDO').lower():
+        if 'type_of_result_match_x' in df.columns and 'type_of_result_match_y' in df.columns:
+            df['mondoLabel'] = np.where(df['mondo_result_label'].notnull(), df['mondo_result_label'], df['mondoLabel'])
+            df.drop(['mondo_result_label'], axis=1, inplace=True)
+
+            df['mondoCode'] = np.where(df['mondo_result_curie'].notnull(), df['mondo_result_curie'], df['mondoCode'])
+            df.drop(['mondo_result_curie'], axis=1, inplace=True)
+
+            df['type_of_result_match_x'] = np.where(df['type_of_result_match_y'].notnull(), df['type_of_result_match_y'], df['type_of_result_match_x'])
+            df.drop(['type_of_result_match_y'], axis=1, inplace=True)
+            df = df.rename(columns={'type_of_result_match_x': 'type_of_result_match'})
+        else:
+            # Update values in the existing columns
+            df['mondoLabel'] = df['mondo_result_label']
+            df['mondoCode'] = df['mondo_result_curie']
+        
+            # Drop the search_results columns
+            df.drop(['mondo_result_label'], axis=1, inplace=True)
+            df.drop(['mondo_result_curie'], axis=1, inplace=True)
+
+
+    return df
 
 
 @main.command("search")
@@ -110,43 +178,43 @@ def search(ontology_id, data_filename):
     xls = pd.ExcelFile(file_path)
     # TODO: parameterize Sheet name variable?
     data_df = pd.read_excel(xls, 'Sheet1') #condition_codes_v5
+    
+    # Add a new column 'UUID' with UUID values
+    data_df['UUID'] = data_df.apply(lambda row: generate_uuid(), axis=1)
     logger.info(data_df.nunique())
 
-    # Search for matching ontology terms
+    # Search for matching ontology terms to LABEL
     exact_label_search_config = SearchConfiguration(
         properties=[SearchProperty.LABEL],
         force_case_insensitive=True,
     )
-
     exact_label_results_df = search_ontology(ontology_id, adapter, data_df, exact_label_search_config)
     
     # Join exact_label_results_df back to original input data
-    overall_results_df = pd.merge(data_df, exact_label_results_df, how='left', on='source_column_value')
+    overall_exact_label_results_df = pd.merge(data_df, exact_label_results_df, how='left', on='UUID')
 
-    # Copy search result values into their existing column, e.g. mondo_result_label --> mondoLabel
-    if ontology_id == str('MONDO').lower():
-        # Update values in the existing columns
-        overall_results_df['mondoLabel'] = overall_results_df['mondo_result_label']
-        overall_results_df['mondoCode'] = overall_results_df['mondo_result_curie']
+    # Clean up dataframe to remove original search columns
+    overall_exact_label_results_df = _clean_up_columns(overall_exact_label_results_df, ontology_id)
 
-        # Drop the search_results columns
-        overall_results_df.drop(['mondo_result_label'], axis=1, inplace=True)
-        overall_results_df.drop(['mondo_result_curie'], axis=1, inplace=True)
+    # Filter out rows that have results to prepare for synonym search
+    filtered_df = overall_exact_label_results_df[overall_exact_label_results_df['type_of_result_match'].isnull()]
 
-    
-    # Save to file
-    overall_results_df.to_excel('mondo_exact_label_results.xlsx')
 
-    exit()
-
+    # Search for matching terms to SYNONYM
     exact_label_synonym_search_config = SearchConfiguration(
         properties=[SearchProperty.ALIAS],
         force_case_insensitive=True,
     )
+    overall_exact_synonym_results_df = search_ontology(ontology_id, adapter, filtered_df, exact_label_synonym_search_config)
 
-    exact_label_synonym_results_df = search_ontology(adapter, data_df, exact_label_synonym_search_config)
+    # Join overall_exact_synonym_results_df back to overall_results_df
+    overall_final_results_df = pd.merge(overall_exact_label_results_df, overall_exact_synonym_results_df, how='left', on='UUID')
 
-    exact_label_synonym_results_df.to_excel('mondo_exact_label_synonym_results.xlsx')
+    # Clean up dataframe to remove original search columns
+    overall_final_results_df = _clean_up_columns(overall_final_results_df, ontology_id)
+
+    # Save to file
+    overall_final_results_df.to_excel('mondo_exact_label_and_synonym_results.xlsx', index=False)
 
 
 @main.command("hello")
