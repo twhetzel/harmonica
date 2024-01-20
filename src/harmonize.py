@@ -78,12 +78,11 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
 
     # Create a tqdm instance
     progress_bar = tqdm(total=len(df), desc="Processing Rows", unit="row")
-    
+
     for index, row in df.iterrows():
         # TODO: Parameterize search column
-        # TODO: Fix bug when multiple synonym results!
         for result in adapter.basic_search(row.iloc[2], config=config):
-            logger.debug(f'{row["UUID"]} -- {row.iloc[2]} ---> {result}')
+            # logger.debug(f'{row["UUID"]} -- {row.iloc[2]} ---> {result} - {adapter.label(result)}')
             exact_search_results.append([row["UUID"], result, adapter.label(result)])
             # Update the progress bar
             progress_bar.update(1)
@@ -92,13 +91,24 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     progress_bar.close()
 
     # Convert search results to dataframe
-    search_results_df = pd.DataFrame(exact_search_results)
-    
-    # Add column headers
-    search_results_df.columns = ['UUID', f'{ontology_id}_result_curie', f'{ontology_id}_result_label']
+    results_df = pd.DataFrame(exact_search_results)
 
-    # Filter rows to keep those where '{ontology}_result_curie' starts with 'MONDO'
-    search_results_df = search_results_df[search_results_df[f'{ontology_id}_result_curie'].str.startswith(f'{ontology_id}'.upper())]
+    # Add column headers
+    results_df.columns = ['UUID', f'{ontology_id}_result_curie', f'{ontology_id}_result_label']
+
+    # Filter rows to keep those where '{ontology}_result_curie' starts with the "ontology_id"
+    # TODO: Decide whether these results should still be filtered out
+    results_df = results_df[results_df[f'{ontology_id}_result_curie'].str.startswith(f'{ontology_id}'.upper())]
+
+    # Group by 'UUID' and aggregate curie and label into lists
+    search_results_df = results_df.groupby('UUID').agg({
+        f'{ontology_id}_result_curie': list,
+        f'{ontology_id}_result_label': list
+    }).reset_index()
+
+    # Convert lists to strings
+    search_results_df[f'{ontology_id}_result_curie'] = search_results_df[f'{ontology_id}_result_curie'].astype(str).str.strip('[]').str.replace("'", "")
+    search_results_df[f'{ontology_id}_result_label'] = search_results_df[f'{ontology_id}_result_label'].astype(str).str.strip('[]').str.replace("'", "")
 
     # Add column to indicate type of search match
     if str(config.properties[0]) == 'LABEL':
@@ -202,7 +212,7 @@ def search(ontology_id: str, data_filename: str):
     overall_final_results_df = _clean_up_columns(overall_final_results_df, ontology_id)
 
     # Save to file
-    overall_final_results_df.to_excel('mondo_exact_label_and_synonym_results.xlsx', index=False)
+    overall_final_results_df.to_excel(f'{ontology_id}_exact_label_and_synonym_results.xlsx', index=False)
 
 
 @main.command("hello")
