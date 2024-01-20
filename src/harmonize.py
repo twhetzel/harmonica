@@ -88,7 +88,7 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
             logger.debug(f'{row["UUID"]} -- {row.iloc[2]} ---> {result} - {adapter.label(result)}')
             exact_search_results.append([row["UUID"], result, adapter.label(result)])
             # Update the progress bar
-            # progress_bar.update(1)
+            progress_bar.update(1)
 
     # Close the progress bar
     progress_bar.close()
