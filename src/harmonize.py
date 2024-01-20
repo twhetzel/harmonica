@@ -74,6 +74,9 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     :param adapter: The connector to the ontology database.
     :param df: Dataframe containing terms to search and find matches to the ontology.
     """
+    if ontology_id.lower() == 'hp':
+        ontology_prefix = 'hpo'
+    
     exact_search_results = []
 
     # Create a tqdm instance
@@ -82,10 +85,10 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     for index, row in df.iterrows():
         # TODO: Parameterize search column
         for result in adapter.basic_search(row.iloc[2], config=config):
-            # logger.debug(f'{row["UUID"]} -- {row.iloc[2]} ---> {result} - {adapter.label(result)}')
+            logger.debug(f'{row["UUID"]} -- {row.iloc[2]} ---> {result} - {adapter.label(result)}')
             exact_search_results.append([row["UUID"], result, adapter.label(result)])
             # Update the progress bar
-            progress_bar.update(1)
+            # progress_bar.update(1)
 
     # Close the progress bar
     progress_bar.close()
@@ -94,30 +97,31 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     results_df = pd.DataFrame(exact_search_results)
 
     # Add column headers
-    results_df.columns = ['UUID', f'{ontology_id}_result_curie', f'{ontology_id}_result_label']
+    results_df.columns = ['UUID', f'{ontology_prefix}_result_curie', f'{ontology_prefix}_result_label']
 
-    # Filter rows to keep those where '{ontology}_result_curie' starts with the "ontology_id"
+    # Filter rows to keep those where '{ontology}_result_curie' starts with the "ontology_id", keep in mind hp vs. hpo
     # TODO: Decide whether these results should still be filtered out
-    results_df = results_df[results_df[f'{ontology_id}_result_curie'].str.startswith(f'{ontology_id}'.upper())]
+    results_df = results_df[results_df[f'{ontology_prefix}_result_curie'].str.startswith(f'{ontology_id}'.upper())]
+    print(results_df.head(len(results_df)))
 
     # Group by 'UUID' and aggregate curie and label into lists
     search_results_df = results_df.groupby('UUID').agg({
-        f'{ontology_id}_result_curie': list,
-        f'{ontology_id}_result_label': list
+        f'{ontology_prefix}_result_curie': list,
+        f'{ontology_prefix}_result_label': list
     }).reset_index()
 
     # Convert lists to strings
-    search_results_df[f'{ontology_id}_result_curie'] = search_results_df[f'{ontology_id}_result_curie'].astype(str).str.strip('[]').str.replace("'", "")
-    search_results_df[f'{ontology_id}_result_label'] = search_results_df[f'{ontology_id}_result_label'].astype(str).str.strip('[]').str.replace("'", "")
+    search_results_df[f'{ontology_prefix}_result_curie'] = search_results_df[f'{ontology_prefix}_result_curie'].astype(str).str.strip('[]').str.replace("'", "")
+    search_results_df[f'{ontology_prefix}_result_label'] = search_results_df[f'{ontology_prefix}_result_label'].astype(str).str.strip('[]').str.replace("'", "")
 
     # Add column to indicate type of search match
     if str(config.properties[0]) == 'LABEL':
         search_results_df['type_of_result_match'] = np.where(
-            search_results_df[f'{ontology_id}_result_curie'].notnull(), f'{ontology_id.upper()}_EXACT_LABEL', '')
+            search_results_df[f'{ontology_prefix}_result_curie'].notnull(), f'{ontology_prefix.upper()}_EXACT_LABEL', '')
     
     if str(config.properties[0]) == 'ALIAS':
         search_results_df['type_of_result_match'] = np.where(
-            search_results_df[f'{ontology_id}_result_curie'].notnull(), f'{ontology_id.upper()}_EXACT_ALIAS', '')
+            search_results_df[f'{ontology_prefix}_result_curie'].notnull(), f'{ontology_prefix.upper()}_EXACT_ALIAS', '')
 
     return search_results_df
 
@@ -134,26 +138,31 @@ def _clean_up_columns(df: pd.DataFrame, ontology_id: str) -> pd.DataFrame:
     :param df: The dataframe from the merge of the search results with the original dataframe.
     :param ontology_id: The ontology identifier, ie. the ontology being searched  
     """
+    if ontology_id.lower() == 'hp':
+        ontology_id = 'hpo'
+
     # Handle clean-up after a second round of synonym search
-    if ontology_id == str('MONDO').lower():
-        if 'type_of_result_match_x' in df.columns and 'type_of_result_match_y' in df.columns:
-            df['mondoLabel'] = np.where(df['mondo_result_label'].notnull(), df['mondo_result_label'], df['mondoLabel'])
-            df.drop(['mondo_result_label'], axis=1, inplace=True)
+    if 'type_of_result_match_x' in df.columns and 'type_of_result_match_y' in df.columns:
+        # Copy result label values to original df column and then drop result column
+        df[f'{ontology_id}Label'] = np.where(df[f'{ontology_id}_result_label'].notnull(), df[f'{ontology_id}_result_label'], df[f'{ontology_id}Label'])
+        df.drop([f'{ontology_id}_result_label'], axis=1, inplace=True)
 
-            df['mondoCode'] = np.where(df['mondo_result_curie'].notnull(), df['mondo_result_curie'], df['mondoCode'])
-            df.drop(['mondo_result_curie'], axis=1, inplace=True)
+        # Copy result curie values to original df column and then drop result column
+        df[f'{ontology_id}Code'] = np.where(df[f'{ontology_id}_result_curie'].notnull(), df[f'{ontology_id}_result_curie'], df[f'{ontology_id}Code'])
+        df.drop([f'{ontology_id}_result_curie'], axis=1, inplace=True)
 
-            df['type_of_result_match_x'] = np.where(df['type_of_result_match_y'].notnull(), df['type_of_result_match_y'], df['type_of_result_match_x'])
-            df.drop(['type_of_result_match_y'], axis=1, inplace=True)
-            df = df.rename(columns={'type_of_result_match_x': 'type_of_result_match'})
-        else:
-            # Update values in the existing columns
-            df['mondoLabel'] = df['mondo_result_label']
-            df['mondoCode'] = df['mondo_result_curie']
-        
-            # Drop the search_results columns
-            df.drop(['mondo_result_label'], axis=1, inplace=True)
-            df.drop(['mondo_result_curie'], axis=1, inplace=True)
+        # Copy type of result match to original df column and then drop result column and rename original df column
+        df['type_of_result_match_x'] = np.where(df['type_of_result_match_y'].notnull(), df['type_of_result_match_y'], df['type_of_result_match_x'])
+        df.drop(['type_of_result_match_y'], axis=1, inplace=True)
+        df = df.rename(columns={'type_of_result_match_x': 'type_of_result_match'})
+    else:
+        # Update values in the existing columns
+        df[f'{ontology_id}Label'] = df[f'{ontology_id}_result_label']
+        df[f'{ontology_id}Code'] = df[f'{ontology_id}_result_curie']
+    
+        # Drop the search_results columns
+        df.drop([f'{ontology_id}_result_label'], axis=1, inplace=True)
+        df.drop([f'{ontology_id}_result_curie'], axis=1, inplace=True)
 
 
     return df
