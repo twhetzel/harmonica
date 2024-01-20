@@ -32,3 +32,25 @@ The input data file is expected to be stored locally at `data/input/` and the re
 - `compare_oak2rdflib.py` - added to check that all classes obtained used rdflib are also found in the semsql database. This was created because there was a confusion about which Mondo version was downloaded and a difference was seen between the content of the semsql database and rdflib using the latest Mondo release. It turns out the semsql database had not been updated when testing to provide the latest release of Mondo.
 
 `rdflib_test.py` - extract classes from Mondo using rdflib
+
+
+## Further Investigation
+Review these items later to see if they can be done with OAK.
+
+### Sort out if/how other parameters work for OAK Search
+ # Configure the search -- KEEP!
+    # config = SearchConfiguration(syntax=SearchTermSyntax.STARTS_WITH) # Example from: https://github.com/INCATools/ontology-access-kit/blob/main/notebooks/Developers-Tutorial.ipynb
+
+    # Configure the search -- KEEP!
+    # config = SearchConfiguration(
+    # TODO: Find out how to use object_source to limit results to an ontology as well as 
+    # object_source_match and snippet from SearchResult. 
+    # See https://incatools.github.io/ontology-access-kit/datamodels/search/ and 
+    # https://incatools.github.io/ontology-access-kit/datamodels/search/SearchResult.html 
+    #     # properties=[SearchProperty.ALIAS], # matches to label and synonyms
+    #     properties=[SearchProperty.LABEL], #matches label only
+    #     force_case_insensitive=True,
+    #     # is_complete=True,
+    #     # is_partial=True, # does not seem to work even with single token label, e.g. ureteroc MONDO:0008628
+    #     # is_fuzzy=True, # does not seem to work for fuzzy match to labels (ureteroc MONDO:0008628) or synonyms (intertricular commcation MONDO:0002070)
+    # )
