@@ -1,4 +1,4 @@
-# Search ontology, run as: make search ontology_id=mondo data_filename=TEST
+# Search ontology, run as: make search oid="mondo,hp" data_filename="test_data.xlsx"
 search:
-	@echo "** Search ontology: $(ontology_id)"
-	python src/harmonize.py search $(ontology_id) '$(data_filename)'
+	@echo "** Search ontology: $(oid)"
+	python src/harmonize.py search --oid $(oid) --data_filename $(data_filename)

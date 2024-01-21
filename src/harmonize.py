@@ -74,9 +74,8 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     :param adapter: The connector to the ontology database.
     :param df: Dataframe containing terms to search and find matches to the ontology.
     """
-    if ontology_id.lower() == 'hp':
-        ontology_prefix = 'hpo'
-    
+
+    ontology_prefix = 'hpo' if ontology_id.lower() == 'hp' else ontology_id
     exact_search_results = []
 
     # Create a tqdm instance
@@ -102,7 +101,6 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     # Filter rows to keep those where '{ontology}_result_curie' starts with the "ontology_id", keep in mind hp vs. hpo
     # TODO: Decide whether these results should still be filtered out
     results_df = results_df[results_df[f'{ontology_prefix}_result_curie'].str.startswith(f'{ontology_id}'.upper())]
-    print(results_df.head(len(results_df)))
 
     # Group by 'UUID' and aggregate curie and label into lists
     search_results_df = results_df.groupby('UUID').agg({
@@ -169,16 +167,17 @@ def _clean_up_columns(df: pd.DataFrame, ontology_id: str) -> pd.DataFrame:
 
 
 @main.command("search")
-@click.argument('ontology_id')
-@click.argument('data_filename')
-def search(ontology_id: str, data_filename: str):
+@click.option('--oid', '-o', help='Ontology IDs separated by commas')
+@click.option('--data_filename', '-d')
+def search(oid: tuple, data_filename: str):
     """
     Search an ontology for matches to terms in a data file.
     :param ontology_id: The OBO identifier of the ontology.
     :param data_filename: The name of the file with terms to search for ontology matches.
     """
-    # Get the ontology
-    adapter = fetch_ontology(ontology_id)
+    oid = tuple(oid.split(',')) if oid else ()
+
+    all_final_results_dict = {}
 
     # Read in the data file
     file_path = Path(f'data/input/{data_filename}')
@@ -186,42 +185,79 @@ def search(ontology_id: str, data_filename: str):
     # TODO: parameterize Sheet name variable?
     data_df = pd.read_excel(xls, 'Sheet1') #condition_codes_v5
     
-    # Add a new column 'UUID' with UUID values
+    # Add a new column 'UUID' with unique identifier values
     data_df['UUID'] = data_df.apply(lambda row: generate_uuid(), axis=1)
     logger.info(data_df.nunique())
 
-    # Search for matching ontology terms to LABEL
+    # Exact LABEL Search configuration
     exact_label_search_config = SearchConfiguration(
-        properties=[SearchProperty.LABEL],
-        force_case_insensitive=True,
-    )
-    exact_label_results_df = search_ontology(ontology_id, adapter, data_df, exact_label_search_config)
+            properties=[SearchProperty.LABEL],
+            force_case_insensitive=True,
+        )
     
-    # Join exact_label_results_df back to original input data
-    overall_exact_label_results_df = pd.merge(data_df, exact_label_results_df, how='left', on='UUID')
-
-    # Clean up dataframe to remove original search columns
-    overall_exact_label_results_df = _clean_up_columns(overall_exact_label_results_df, ontology_id)
-
-    # Filter out rows that have results to prepare for synonym search
-    filtered_df = overall_exact_label_results_df[overall_exact_label_results_df['type_of_result_match'].isnull()]
-
-
-    # Search for matching terms to SYNONYM
+    # Exact LABEL and SYNONYM Search configuration
     exact_label_synonym_search_config = SearchConfiguration(
-        properties=[SearchProperty.ALIAS],
-        force_case_insensitive=True,
-    )
-    overall_exact_synonym_results_df = search_ontology(ontology_id, adapter, filtered_df, exact_label_synonym_search_config)
+            properties=[SearchProperty.ALIAS],
+            force_case_insensitive=True,
+        )
 
-    # Join overall_exact_synonym_results_df back to overall_results_df
-    overall_final_results_df = pd.merge(overall_exact_label_results_df, overall_exact_synonym_results_df, how='left', on='UUID')
 
-    # Clean up dataframe to remove original search columns
-    overall_final_results_df = _clean_up_columns(overall_final_results_df, ontology_id)
+    # TODO: Rethink looping logic to account for >1 ontology
+    for ontology_id in oid:
+        # Get the ontology
+        adapter = fetch_ontology(ontology_id)
 
-    # Save to file
-    overall_final_results_df.to_excel(f'{ontology_id}_exact_label_and_synonym_results.xlsx', index=False)
+        # Search for matching ontology terms to LABEL
+        exact_label_results_df = search_ontology(ontology_id, adapter, data_df, exact_label_search_config)
+        # Join exact_label_results_df back to original input data
+        overall_exact_label_results_df = pd.merge(data_df, exact_label_results_df, how='left', on='UUID')
+        # Clean up dataframe to remove original search columns
+        overall_exact_label_results_df = _clean_up_columns(overall_exact_label_results_df, ontology_id)
+
+        # Filter out rows that have results to prepare for synonym search
+        filtered_df = overall_exact_label_results_df[overall_exact_label_results_df['type_of_result_match'].isnull()]
+
+        # Search for matching terms to SYNONYM
+        overall_exact_synonym_results_df = search_ontology(ontology_id, adapter, filtered_df, exact_label_synonym_search_config)
+        # Join overall_exact_synonym_results_df back to overall_results_df
+        overall_final_results_df = pd.merge(overall_exact_label_results_df, overall_exact_synonym_results_df, how='left', on='UUID')
+        # Clean up dataframe to remove original search columns
+        overall_final_results_df = _clean_up_columns(overall_final_results_df, ontology_id)
+
+        # Save ontology search results to a dict
+        all_final_results_dict[ontology_id] = overall_final_results_df
+
+
+
+    # Finally, combine all results and save to file!
+    # Concatenate all DataFrames into a single DataFrame
+    result_df = pd.concat(all_final_results_dict.values(), ignore_index=True)
+
+    # Replace NaN values with empty string
+    df_cleaned = result_df.fillna('')
+
+    # Define a custom aggregation function to join non-empty values
+    def custom_join(series):
+        non_empty_values = [value for value in series if value != '']
+        return ', '.join(non_empty_values)
+
+    # Group by specific columns and combine rows
+    combined_df = df_cleaned.groupby(
+        ['UUID', 'study', 'source_column', 'source_column_value', 'conditionMeasureSourceText']).agg({
+        'hpoLabel': custom_join,
+        'hpoCode': custom_join,
+        'mondoLabel': custom_join,
+        'mondoCode': custom_join,
+        'maxoLabel': custom_join,
+        'maxoCode': custom_join,
+        'otherLabel': custom_join,
+        'otherCode': custom_join,
+        'Trish Notes': custom_join,
+        'type_of_result_match': custom_join
+    }).reset_index()
+
+    # Save combined results to file
+    combined_df.to_excel('combined_ontology_annotations.xlsx')
 
 
 @main.command("hello")
