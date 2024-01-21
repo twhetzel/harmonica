@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import click
+from datetime import datetime
 import uuid
 import logging
 from oaklib import get_adapter
@@ -112,6 +113,7 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     search_results_df[f'{ontology_prefix}_result_curie'] = search_results_df[f'{ontology_prefix}_result_curie'].astype(str).str.strip('[]').str.replace("'", "")
     search_results_df[f'{ontology_prefix}_result_label'] = search_results_df[f'{ontology_prefix}_result_label'].astype(str).str.strip('[]').str.replace("'", "")
 
+    # TODO: Maintain individual columns of type_of_result_match for each ontology searched!
     # Add column to indicate type of search match
     if str(config.properties[0]) == 'LABEL':
         search_results_df['type_of_result_match'] = np.where(
@@ -176,6 +178,13 @@ def search(oid: tuple, data_filename: str):
     :param data_filename: The name of the file with terms to search for ontology matches.
     """
     oid = tuple(oid.split(',')) if oid else ()
+    filename_prefix = '_'.join(oid)
+    output_data_directory = './data/output/'
+
+    # Get the current formatted timestamp
+    timestamp = datetime.now()
+    formatted_timestamp = timestamp.strftime("%Y%m%d-%H%M%S")
+
 
     all_final_results_dict = {}
 
@@ -202,7 +211,6 @@ def search(oid: tuple, data_filename: str):
         )
 
 
-    # TODO: Rethink looping logic to account for >1 ontology
     for ontology_id in oid:
         # Get the ontology
         adapter = fetch_ontology(ontology_id)
@@ -257,7 +265,7 @@ def search(oid: tuple, data_filename: str):
     }).reset_index()
 
     # Save combined results to file
-    combined_df.to_excel('combined_ontology_annotations.xlsx')
+    combined_df.to_excel(f'{output_data_directory}{filename_prefix}-combined_ontology_annotations-{formatted_timestamp}.xlsx', index=False)
 
 
 @main.command("hello")
