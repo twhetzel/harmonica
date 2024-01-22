@@ -83,7 +83,7 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     progress_bar = tqdm(total=len(df), desc="Processing Rows", unit="row")
 
     for index, row in df.iterrows():
-        # TODO: Parameterize search column
+        # TODO: Parameterize search column value
         for result in adapter.basic_search(row.iloc[2], config=config):
             logger.debug(f'{row["UUID"]} -- {row.iloc[2]} ---> {result} - {adapter.label(result)}')
             exact_search_results.append([row["UUID"], result, adapter.label(result)])
@@ -123,7 +123,6 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
         search_results_df[f'{ontology_prefix}_result_match_type'] = np.where(
             search_results_df[f'{ontology_prefix}_result_curie'].notnull(), f'{ontology_prefix.upper()}_EXACT_ALIAS', '')
 
-    print(search_results_df.head())
     return search_results_df
 
 
@@ -139,8 +138,6 @@ def _clean_up_columns(df: pd.DataFrame, ontology_id: str) -> pd.DataFrame:
     :param df: The dataframe from the merge of the search results with the original dataframe.
     :param ontology_id: The ontology identifier, ie. the ontology being searched  
     """
-    # if ontology_id.lower() == 'hp':
-    #     ontology_id = 'hpo'
     ontology_prefix = 'hpo' if ontology_id.lower() == 'hp' else ontology_id
 
     # Handle clean-up after a second round of synonym search
@@ -197,8 +194,10 @@ def search(oid: tuple, data_filename: str):
     data_df = pd.read_excel(xls, 'Sheet1') #condition_codes_v5
     
     # Add a new column 'UUID' with unique identifier values
+    # TODO: Add the UUID column if it does not already exist
     data_df['UUID'] = data_df.apply(lambda row: generate_uuid(), axis=1)
-    logger.info(data_df.nunique())
+    logger.debug(data_df.nunique())
+    logger.info("Number of total rows in dataframe: %s", len(data_df))
 
     # Exact LABEL Search configuration
     exact_label_search_config = SearchConfiguration(
@@ -228,7 +227,6 @@ def search(oid: tuple, data_filename: str):
 
         # Filter out rows that have results to prepare for synonym search
         filtered_df = overall_exact_label_results_df[overall_exact_label_results_df[f'{ontology_prefix}_result_match_type'].isnull()]
-        print('Filtered: ', filtered_df.columns)
 
         # Search for matching terms to SYNONYM
         overall_exact_synonym_results_df = search_ontology(ontology_id, adapter, filtered_df, exact_label_synonym_search_config)
@@ -236,7 +234,6 @@ def search(oid: tuple, data_filename: str):
         overall_final_results_df = pd.merge(overall_exact_label_results_df, overall_exact_synonym_results_df, how='left', on='UUID')
         # Clean up dataframe to remove original search columns
         overall_final_results_df = _clean_up_columns(overall_final_results_df, ontology_id)
-        print('Overall:', overall_final_results_df.columns)
 
         # Save ontology search results to a dict
         all_final_results_dict[ontology_id] = overall_final_results_df
@@ -256,40 +253,18 @@ def search(oid: tuple, data_filename: str):
         return ', '.join(non_empty_values)
     
 
-    # TODO: Sort out how to add or determine if search was run with hpo, mondo, and maxo to be able to add columns into groupby statement
-    columns_to_groupby = ['UUID', 'study', 'source_column', 'source_column_value', 'conditionMeasureSourceText', 'otherLabel', 'otherCode', 'Trish Notes']
-    # columns_to_agg = [col for col in df_cleaned.columns if col not in columns_to_groupby]
+    # Add columns dynamically to the "agg" function _if_ they exist within the dataframe
+    columns_to_groupby = ['UUID', 'study', 'source_column', 'source_column_value', 'conditionMeasureSourceText']
     columns_to_agg = [col for col in df_cleaned.columns if col in [
         'hpoLabel', 'hpoCode', 'hpo_result_match_type',
         'mondoLabel', 'mondoCode', 'mondo_result_match_type', 
-        'maxoLabel', 'maxoCode', 'maxo_result_match_type']
+        'maxoLabel', 'maxoCode', 'maxo_result_match_type',
+        'otherLabel', 'otherCode', 'Trish Notes']
     ]
-    print('CTA:', columns_to_agg)
 
     # Perform the groupby and aggregation
     agg_dict = {col: custom_join for col in columns_to_agg}
     combined_df = df_cleaned.groupby(columns_to_groupby).agg(agg_dict).reset_index()
-
-
-
-    
-    # Group by specific columns and combine rows --> ORIG
-    # combined_df = df_cleaned.groupby(
-    #     ['UUID', 'study', 'source_column', 'source_column_value', 'conditionMeasureSourceText']).agg({
-    #     'hpoLabel': custom_join,
-    #     'hpoCode': custom_join,
-    #     # 'hpo_result_match_type': custom_join,
-    #     # 'mondoLabel': custom_join,
-    #     # 'mondoCode': custom_join,
-    #     # 'mondo_result_match_type': custom_join,
-    #     'maxoLabel': custom_join,
-    #     'maxoCode': custom_join,
-    #     # 'maxo_result_match_type': custom_join,
-    #     'otherLabel': custom_join,
-    #     'otherCode': custom_join,
-    #     'Trish Notes': custom_join,
-    #     # 'type_of_result_match': custom_join
-    # }).reset_index()
 
 
     # Save combined results to file
