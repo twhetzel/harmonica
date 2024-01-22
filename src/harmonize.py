@@ -79,7 +79,7 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     ontology_prefix = 'hpo' if ontology_id.lower() == 'hp' else ontology_id
     exact_search_results = []
 
-    # Create a tqdm instance
+    # Create a tqdm instance to display search progress
     progress_bar = tqdm(total=len(df), desc="Processing Rows", unit="row")
 
     for index, row in df.iterrows():
@@ -113,16 +113,17 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     search_results_df[f'{ontology_prefix}_result_curie'] = search_results_df[f'{ontology_prefix}_result_curie'].astype(str).str.strip('[]').str.replace("'", "")
     search_results_df[f'{ontology_prefix}_result_label'] = search_results_df[f'{ontology_prefix}_result_label'].astype(str).str.strip('[]').str.replace("'", "")
 
-    # TODO: Maintain individual columns of type_of_result_match for each ontology searched!
+    # TODO: Maintain individual columns of result_match_type for each ontology searched!
     # Add column to indicate type of search match
     if str(config.properties[0]) == 'LABEL':
-        search_results_df['type_of_result_match'] = np.where(
+        search_results_df[f'{ontology_prefix}_result_match_type'] = np.where(
             search_results_df[f'{ontology_prefix}_result_curie'].notnull(), f'{ontology_prefix.upper()}_EXACT_LABEL', '')
     
     if str(config.properties[0]) == 'ALIAS':
-        search_results_df['type_of_result_match'] = np.where(
+        search_results_df[f'{ontology_prefix}_result_match_type'] = np.where(
             search_results_df[f'{ontology_prefix}_result_curie'].notnull(), f'{ontology_prefix.upper()}_EXACT_ALIAS', '')
 
+    print(search_results_df.head())
     return search_results_df
 
 
@@ -138,31 +139,32 @@ def _clean_up_columns(df: pd.DataFrame, ontology_id: str) -> pd.DataFrame:
     :param df: The dataframe from the merge of the search results with the original dataframe.
     :param ontology_id: The ontology identifier, ie. the ontology being searched  
     """
-    if ontology_id.lower() == 'hp':
-        ontology_id = 'hpo'
+    # if ontology_id.lower() == 'hp':
+    #     ontology_id = 'hpo'
+    ontology_prefix = 'hpo' if ontology_id.lower() == 'hp' else ontology_id
 
     # Handle clean-up after a second round of synonym search
-    if 'type_of_result_match_x' in df.columns and 'type_of_result_match_y' in df.columns:
+    if f'{ontology_prefix}_result_match_type_x' in df.columns and f'{ontology_prefix}_result_match_type_y' in df.columns:
         # Copy result label values to original df column and then drop result column
-        df[f'{ontology_id}Label'] = np.where(df[f'{ontology_id}_result_label'].notnull(), df[f'{ontology_id}_result_label'], df[f'{ontology_id}Label'])
-        df.drop([f'{ontology_id}_result_label'], axis=1, inplace=True)
+        df[f'{ontology_prefix}Label'] = np.where(df[f'{ontology_prefix}_result_label'].notnull(), df[f'{ontology_prefix}_result_label'], df[f'{ontology_prefix}Label'])
+        df.drop([f'{ontology_prefix}_result_label'], axis=1, inplace=True)
 
         # Copy result curie values to original df column and then drop result column
-        df[f'{ontology_id}Code'] = np.where(df[f'{ontology_id}_result_curie'].notnull(), df[f'{ontology_id}_result_curie'], df[f'{ontology_id}Code'])
-        df.drop([f'{ontology_id}_result_curie'], axis=1, inplace=True)
+        df[f'{ontology_prefix}Code'] = np.where(df[f'{ontology_prefix}_result_curie'].notnull(), df[f'{ontology_prefix}_result_curie'], df[f'{ontology_prefix}Code'])
+        df.drop([f'{ontology_prefix}_result_curie'], axis=1, inplace=True)
 
         # Copy type of result match to original df column and then drop result column and rename original df column
-        df['type_of_result_match_x'] = np.where(df['type_of_result_match_y'].notnull(), df['type_of_result_match_y'], df['type_of_result_match_x'])
-        df.drop(['type_of_result_match_y'], axis=1, inplace=True)
-        df = df.rename(columns={'type_of_result_match_x': 'type_of_result_match'})
+        df[f'{ontology_prefix}_result_match_type_x'] = np.where(df[f'{ontology_prefix}_result_match_type_y'].notnull(), df[f'{ontology_prefix}_result_match_type_y'], df[f'{ontology_prefix}_result_match_type_x'])
+        df.drop([f'{ontology_prefix}_result_match_type_y'], axis=1, inplace=True)
+        df = df.rename(columns={f'{ontology_prefix}_result_match_type_x': f'{ontology_prefix}_result_match_type'})
     else:
         # Update values in the existing columns
-        df[f'{ontology_id}Label'] = df[f'{ontology_id}_result_label']
-        df[f'{ontology_id}Code'] = df[f'{ontology_id}_result_curie']
+        df[f'{ontology_prefix}Label'] = df[f'{ontology_prefix}_result_label']
+        df[f'{ontology_prefix}Code'] = df[f'{ontology_prefix}_result_curie']
     
         # Drop the search_results columns
-        df.drop([f'{ontology_id}_result_label'], axis=1, inplace=True)
-        df.drop([f'{ontology_id}_result_curie'], axis=1, inplace=True)
+        df.drop([f'{ontology_prefix}_result_label'], axis=1, inplace=True)
+        df.drop([f'{ontology_prefix}_result_curie'], axis=1, inplace=True)
 
 
     return df
@@ -212,6 +214,8 @@ def search(oid: tuple, data_filename: str):
 
 
     for ontology_id in oid:
+        ontology_prefix = 'hpo' if ontology_id.lower() == 'hp' else ontology_id
+
         # Get the ontology
         adapter = fetch_ontology(ontology_id)
 
@@ -223,7 +227,8 @@ def search(oid: tuple, data_filename: str):
         overall_exact_label_results_df = _clean_up_columns(overall_exact_label_results_df, ontology_id)
 
         # Filter out rows that have results to prepare for synonym search
-        filtered_df = overall_exact_label_results_df[overall_exact_label_results_df['type_of_result_match'].isnull()]
+        filtered_df = overall_exact_label_results_df[overall_exact_label_results_df[f'{ontology_prefix}_result_match_type'].isnull()]
+        print('Filtered: ', filtered_df.columns)
 
         # Search for matching terms to SYNONYM
         overall_exact_synonym_results_df = search_ontology(ontology_id, adapter, filtered_df, exact_label_synonym_search_config)
@@ -231,6 +236,7 @@ def search(oid: tuple, data_filename: str):
         overall_final_results_df = pd.merge(overall_exact_label_results_df, overall_exact_synonym_results_df, how='left', on='UUID')
         # Clean up dataframe to remove original search columns
         overall_final_results_df = _clean_up_columns(overall_final_results_df, ontology_id)
+        print('Overall:', overall_final_results_df.columns)
 
         # Save ontology search results to a dict
         all_final_results_dict[ontology_id] = overall_final_results_df
@@ -248,21 +254,43 @@ def search(oid: tuple, data_filename: str):
     def custom_join(series):
         non_empty_values = [value for value in series if value != '']
         return ', '.join(non_empty_values)
+    
 
-    # Group by specific columns and combine rows
-    combined_df = df_cleaned.groupby(
-        ['UUID', 'study', 'source_column', 'source_column_value', 'conditionMeasureSourceText']).agg({
-        'hpoLabel': custom_join,
-        'hpoCode': custom_join,
-        'mondoLabel': custom_join,
-        'mondoCode': custom_join,
-        'maxoLabel': custom_join,
-        'maxoCode': custom_join,
-        'otherLabel': custom_join,
-        'otherCode': custom_join,
-        'Trish Notes': custom_join,
-        'type_of_result_match': custom_join
-    }).reset_index()
+    # TODO: Sort out how to add or determine if search was run with hpo, mondo, and maxo to be able to add columns into groupby statement
+    columns_to_groupby = ['UUID', 'study', 'source_column', 'source_column_value', 'conditionMeasureSourceText', 'otherLabel', 'otherCode', 'Trish Notes']
+    # columns_to_agg = [col for col in df_cleaned.columns if col not in columns_to_groupby]
+    columns_to_agg = [col for col in df_cleaned.columns if col in [
+        'hpoLabel', 'hpoCode', 'hpo_result_match_type',
+        'mondoLabel', 'mondoCode', 'mondo_result_match_type', 
+        'maxoLabel', 'maxoCode', 'maxo_result_match_type']
+    ]
+    print('CTA:', columns_to_agg)
+
+    # Perform the groupby and aggregation
+    agg_dict = {col: custom_join for col in columns_to_agg}
+    combined_df = df_cleaned.groupby(columns_to_groupby).agg(agg_dict).reset_index()
+
+
+
+    
+    # Group by specific columns and combine rows --> ORIG
+    # combined_df = df_cleaned.groupby(
+    #     ['UUID', 'study', 'source_column', 'source_column_value', 'conditionMeasureSourceText']).agg({
+    #     'hpoLabel': custom_join,
+    #     'hpoCode': custom_join,
+    #     # 'hpo_result_match_type': custom_join,
+    #     # 'mondoLabel': custom_join,
+    #     # 'mondoCode': custom_join,
+    #     # 'mondo_result_match_type': custom_join,
+    #     'maxoLabel': custom_join,
+    #     'maxoCode': custom_join,
+    #     # 'maxo_result_match_type': custom_join,
+    #     'otherLabel': custom_join,
+    #     'otherCode': custom_join,
+    #     'Trish Notes': custom_join,
+    #     # 'type_of_result_match': custom_join
+    # }).reset_index()
+
 
     # Save combined results to file
     combined_df.to_excel(f'{output_data_directory}{filename_prefix}-combined_ontology_annotations-{formatted_timestamp}.xlsx', index=False)

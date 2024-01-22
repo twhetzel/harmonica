@@ -8,6 +8,8 @@ python src/harmonize.py -vv search --oid "mondo,hp" --data_filename "test_data.x
 ### Make
 make search oid="mondo,hp" data_filename="test_data.xlsx"
 
+_NOTE: Do not include any spaces when passing multiple ontology identifiers (oid)._
+
 
 ## Ontology SQLite Database
 Using `get_adapter(f"sqlite:obo:{ontology_id}")` the ontology database is saved at `~/.data/oaklib/`.
