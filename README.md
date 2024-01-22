@@ -3,10 +3,12 @@ Harmonize data to ontology terms.
 
 ## Usage
 ### Python
-`python src/harmonize.py -vv search mondo 'YOUR FILENAME'`
+python src/harmonize.py -vv search --oid "mondo,hp" --data_filename "test_data.xlsx"
 
 ### Make
-`make search ontology_id=mondo data_filename="YOUR FILENAME"`
+make search oid="mondo,hp" data_filename="test_data.xlsx"
+
+_NOTE: Do not include any spaces when passing multiple ontology identifiers (oid)._
 
 
 ## Ontology SQLite Database
