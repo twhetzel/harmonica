@@ -1,6 +1,9 @@
 # Harmonica
 Harmonize data to ontology terms.
 
+## Prerequisites
+_TODO_ Add a requirements.txt file to include which Python packages need to be installed.
+
 ## Usage
 ### Python
 python src/harmonize.py -vv search --oid "mondo,hp" --data_filename "test_data.xlsx"
