@@ -85,7 +85,6 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     for index, row in df.iterrows():
         # TODO: Parameterize search column value
         for result in adapter.basic_search(row.iloc[2], config=config):
-            logger.debug(f'{row["UUID"]} -- {row.iloc[2]} ---> {result} - {adapter.label(result)}')
             exact_search_results.append([row["UUID"], result, adapter.label(result)])
             # Update the progress bar
             progress_bar.update(1)
@@ -95,9 +94,13 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
 
     # Convert search results to dataframe
     results_df = pd.DataFrame(exact_search_results)
+    logger.debug(results_df.head())
 
     # Add column headers
-    results_df.columns = ['UUID', f'{ontology_prefix}_result_curie', f'{ontology_prefix}_result_label']
+    if results_df.empty:
+        results_df = pd.DataFrame(columns=['UUID', f'{ontology_prefix}_result_curie', f'{ontology_prefix}_result_label'])
+    else:
+        results_df.columns = ['UUID', f'{ontology_prefix}_result_curie', f'{ontology_prefix}_result_label']
 
     # Filter rows to keep those where '{ontology}_result_curie' starts with the "ontology_id", keep in mind hp vs. hpo
     # TODO: Decide whether these results should still be filtered out
@@ -192,6 +195,7 @@ def search(oid: tuple, data_filename: str):
     xls = pd.ExcelFile(file_path)
     # TODO: parameterize Sheet name variable?
     data_df = pd.read_excel(xls, 'Sheet1') #condition_codes_v5
+    logger.debug(data_df.head())
     
     # Add a new column 'UUID' with unique identifier values
     # TODO: Add the UUID column if it does not already exist
