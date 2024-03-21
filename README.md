@@ -59,3 +59,13 @@ Review these items later to see if they can be done with OAK.
     #     # is_partial=True, # does not seem to work even with single token label, e.g. ureteroc MONDO:0008628
     #     # is_fuzzy=True, # does not seem to work for fuzzy match to labels (ureteroc MONDO:0008628) or synonyms (intertricular commcation MONDO:0002070)
     # )
+
+
+### Instructions to set-up OpenAI API Key usage
+- install the Python package as: `pip install --upgrade openai`
+- open your `~/.bash_profile` or `~/.zshrc` file and add `export OPENAI_API_KEY='your-api-key-here'`
+replacing 'your-api-key-here' with your actual API Key value
+- source your profile, e.g. `source ~/.bash_profile` or `source ~/.zshrc`
+- run `python openai-test.py`
+
+See https://platform.openai.com/docs/quickstart?context=python for more details.
